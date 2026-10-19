@@ -5,7 +5,7 @@ API em Go que recebe um CEP brasileiro, consulta a cidade no ViaCEP e obtém a t
 ## Acesso
 
 - **Cloud Run:** ainda não implantado. Preencha aqui a URL pública depois do deploy.
-- **GitHub:** ainda não publicado. Este workspace não possui um remoto configurado.
+- **GitHub:** https://github.com/fabriciobonjorno/desafio-clima
 
 ## API
 
