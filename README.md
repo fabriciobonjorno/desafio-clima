@@ -1,66 +1,45 @@
-# Clima por CEP
+# Desafios de Clima por CEP
 
-API em Go que recebe um CEP brasileiro, consulta a cidade no ViaCEP e obtém a temperatura atual pelo Open-Meteo.
+Este repositório reúne dois projetos independentes em Go para consultar o clima a partir de um CEP.
 
-## Acesso
+## Projetos
 
-- **Cloud Run:** ainda não implantado. Preencha aqui a URL pública depois do deploy.
-- **GitHub:** https://github.com/fabriciobonjorno/desafio-clima
+- [`desafio-basico/`](desafio-basico/README.md): API de consulta de clima por CEP, com testes, Docker e instruções de deploy no Google Cloud Run.
+- [`desafio-observabilidade/`](desafio-observabilidade/README.md): Serviços A e B com tracing distribuído usando OpenTelemetry Collector e Zipkin.
 
-## API
-
-```http
-GET /?cep=01001000
-```
-
-Sucesso (`200`):
-
-```json
-{"temp_C":28.5,"temp_F":83.3,"temp_K":301.5}
-```
-
-CEP malformado retorna `422` e `invalid zipcode`; CEP não encontrado retorna `404` e `can not find zipcode`. Falhas nas APIs externas retornam `502`.
-
-As temperaturas são arredondadas para uma casa decimal em Celsius e Fahrenheit e duas em Kelvin. A conversão Kelvin segue a fórmula deste desafio (`C + 273`).
-
-**Nota sobre o contrato:** o exemplo informado associa `28.5 °C` a `301.65 K`, valor que corresponde a `C + 273.15`. A fórmula escrita no desafio (`C + 273`) resulta em `301.5 K`; a implementação segue a fórmula escrita.
-
-## Rodar localmente
-
-Requer Go 1.23 ou superior.
+## Executar o desafio básico
 
 ```bash
+cd desafio-basico
+go test ./...
 go run ./cmd/server
+```
+
+A API fica em `http://localhost:8080`. Exemplo:
+
+```bash
 curl 'http://localhost:8080/?cep=01001000'
 ```
 
-## Testes
+Para executar via Docker, consulte [`desafio-basico/README.md`](desafio-basico/README.md).
+
+## Executar o desafio com observabilidade
+
+Na raiz do repositório:
 
 ```bash
+docker compose -f desafio-observabilidade/docker-compose.yaml up --build
+```
+
+O Serviço A fica disponível em `http://localhost:8080` e o Zipkin em `http://localhost:9411`. Para testar o segundo projeto sem Docker:
+
+```bash
+cd desafio-observabilidade
 go test ./...
 ```
 
-Os testes de integração simulam ViaCEP e Open-Meteo localmente e não dependem da rede.
+Consulte [`desafio-observabilidade/README.md`](desafio-observabilidade/README.md) para o payload POST e os passos para visualizar os traces.
 
-## Docker
+## Repositório
 
-```bash
-docker build -t clima-por-cep .
-docker run --rm -p 8080:8080 clima-por-cep
-curl 'http://localhost:8080/?cep=01001000'
-```
-
-## Deploy no Google Cloud Run
-
-Com `gcloud` instalado e autenticado, selecione um projeto Google Cloud com faturamento habilitado e execute:
-
-```bash
-gcloud config set project SEU_PROJECT_ID
-gcloud run deploy clima-por-cep \
-  --source . \
-  --region southamerica-east1 \
-  --allow-unauthenticated \
-  --port 8080
-```
-
-Após o deploy, copie a URL exibida pelo comando para a seção **Acesso** acima. A aplicação não contém chaves de API; ViaCEP e Open-Meteo são chamados diretamente.
+https://github.com/fabriciobonjorno/desafio-clima
