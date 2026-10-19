@@ -5,32 +5,31 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"regexp"
+
+	"clima-por-cep/internal/contract"
 )
 
-var zipcodePattern = regexp.MustCompile(`^[0-9]{8}$`)
-
 type CurrentWeather interface {
-	Current(ctx context.Context, zipcode string) (Temperatures, error)
+	Current(context.Context, string) (Result, error)
 }
 
 func NewHandler(service CurrentWeather) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", http.MethodGet)
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		zipcode := r.URL.Query().Get("cep")
-		if !zipcodePattern.MatchString(zipcode) {
-			http.Error(w, "invalid zipcode", http.StatusUnprocessableEntity)
+		zipcode, err := contract.DecodeCEP(r.Body)
+		if err != nil {
+			http.Error(w, contract.ErrInvalidCEP.Error(), http.StatusUnprocessableEntity)
 			return
 		}
 
 		result, err := service.Current(r.Context(), zipcode)
 		if errors.Is(err, ErrZipcodeNotFound) {
-			http.Error(w, "can not find zipcode", http.StatusNotFound)
+			http.Error(w, ErrZipcodeNotFound.Error(), http.StatusNotFound)
 			return
 		}
 		if err != nil {

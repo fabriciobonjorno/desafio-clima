@@ -1,66 +1,65 @@
-# Clima por CEP
+# Clima por CEP com OpenTelemetry e Zipkin
 
-API em Go que recebe um CEP brasileiro, consulta a cidade no ViaCEP e obtém a temperatura atual pelo Open-Meteo.
+Aplicação Go com dois serviços HTTP. O Serviço A valida o CEP e encaminha o pedido ao Serviço B, que consulta o ViaCEP e o Open-Meteo, calcula as temperaturas e devolve a cidade. Ambos exportam traces via OTLP para o OpenTelemetry Collector, que encaminha os dados ao Zipkin.
 
-## Acesso
+## Subir o ambiente
 
-- **Cloud Run:** ainda não implantado. Preencha aqui a URL pública depois do deploy.
-- **GitHub:** https://github.com/fabriciobonjorno/desafio-clima
-
-## API
-
-```http
-GET /?cep=01001000
-```
-
-Sucesso (`200`):
-
-```json
-{"temp_C":28.5,"temp_F":83.3,"temp_K":301.5}
-```
-
-CEP malformado retorna `422` e `invalid zipcode`; CEP não encontrado retorna `404` e `can not find zipcode`. Falhas nas APIs externas retornam `502`.
-
-As temperaturas são arredondadas para uma casa decimal em Celsius e Fahrenheit e duas em Kelvin. A conversão Kelvin segue a fórmula deste desafio (`C + 273`).
-
-**Nota sobre o contrato:** o exemplo informado associa `28.5 °C` a `301.65 K`, valor que corresponde a `C + 273.15`. A fórmula escrita no desafio (`C + 273`) resulta em `301.5 K`; a implementação segue a fórmula escrita.
-
-## Rodar localmente
-
-Requer Go 1.23 ou superior.
+Requer Docker com Docker Compose.
 
 ```bash
-go run ./cmd/server
-curl 'http://localhost:8080/?cep=01001000'
+docker compose up --build
 ```
+
+O Compose sobe Serviço A, Serviço B, OpenTelemetry Collector e Zipkin. O Serviço A fica disponível em `http://localhost:8080`; a interface do Zipkin fica em `http://localhost:9411`.
+
+Se a porta local `8080` já estiver ocupada, defina outra porta para o Serviço A, por exemplo `SERVICE_A_PORT=18080 docker compose up --build` e use `http://localhost:18080`.
+
+## Requisição
+
+Envie um `POST` para o Serviço A:
+
+```bash
+curl -i http://localhost:8080/ \
+  -H 'Content-Type: application/json' \
+  -d '{"cep":"01001000"}'
+```
+
+Sucesso (`200 OK`):
+
+```json
+{
+  "city": "São Paulo",
+  "temp_C": 28.5,
+  "temp_F": 83.3,
+  "temp_K": 301.5
+}
+```
+
+CEP inválido ou corpo JSON malformado retorna `422` com `invalid zipcode`. Um CEP válido, mas não encontrado no ViaCEP, retorna `404` com `can not find zipcode`. Falhas nos provedores externos retornam `502`.
+
+As conversões seguem as fórmulas do enunciado: `F = C × 1.8 + 32` e `K = C + 273`. Isso produz `301.5 K` para `28.5 °C`; o exemplo do desafio mostra `301.65 K`, valor correspondente a `C + 273.15`.
+
+## Ver os traces no Zipkin
+
+1. Faça a requisição de exemplo acima.
+2. Abra [http://localhost:9411](http://localhost:9411).
+3. Selecione o serviço `service-a` ou `service-b` e clique em **Run Query**.
+4. Abra o trace para ver a sequência `service-a → service-b`, além dos spans manuais `zipcode.lookup` e `temperature.lookup` no Serviço B.
+
+O exportador agrupa spans antes de enviá-los; após a requisição, aguarde alguns segundos para o trace aparecer.
+
+O contexto W3C Trace Context é extraído pelo servidor A e injetado no pedido HTTP para B. Os serviços enviam spans em OTLP/HTTP ao Collector; o Collector exporta os traces ao Zipkin.
 
 ## Testes
 
 ```bash
-go test ./...
+go test -race ./...
 ```
 
-Os testes de integração simulam ViaCEP e Open-Meteo localmente e não dependem da rede.
+Os testes usam `httptest` para simular ViaCEP, Open-Meteo e o Serviço B. O teste de fluxo distribuído verifica que os spans de A, B e das consultas externas compartilham o mesmo trace ID.
 
-## Docker
+Para parar os containers:
 
 ```bash
-docker build -t clima-por-cep .
-docker run --rm -p 8080:8080 clima-por-cep
-curl 'http://localhost:8080/?cep=01001000'
+docker compose down
 ```
-
-## Deploy no Google Cloud Run
-
-Com `gcloud` instalado e autenticado, selecione um projeto Google Cloud com faturamento habilitado e execute:
-
-```bash
-gcloud config set project SEU_PROJECT_ID
-gcloud run deploy clima-por-cep \
-  --source . \
-  --region southamerica-east1 \
-  --allow-unauthenticated \
-  --port 8080
-```
-
-Após o deploy, copie a URL exibida pelo comando para a seção **Acesso** acima. A aplicação não contém chaves de API; ViaCEP e Open-Meteo são chamados diretamente.

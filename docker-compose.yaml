@@ -1,0 +1,46 @@
+services:
+  service-a:
+    build:
+      context: .
+      args:
+        SERVICE: service-a
+    environment:
+      SERVICE_B_URL: http://service-b:8081/
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    ports:
+      - "${SERVICE_A_PORT:-8080}:8080"
+    depends_on:
+      - service-b
+      - otel-collector
+    restart: unless-stopped
+
+  service-b:
+    build:
+      context: .
+      args:
+        SERVICE: service-b
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    expose:
+      - "8081"
+    depends_on:
+      - otel-collector
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.162.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    expose:
+      - "4317"
+      - "4318"
+    depends_on:
+      - zipkin
+    restart: unless-stopped
+
+  zipkin:
+    image: openzipkin/zipkin:3.6.1
+    ports:
+      - "9411:9411"
+    restart: unless-stopped

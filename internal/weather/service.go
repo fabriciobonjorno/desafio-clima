@@ -10,17 +10,24 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var ErrZipcodeNotFound = errors.New("can not find zipcode")
 
 const (
-	viacepURL    = "https://viacep.com.br/ws"
-	geocodingURL = "https://geocoding-api.open-meteo.com/v1/search"
-	forecastURL  = "https://api.open-meteo.com/v1/forecast"
+	viacepURL     = "https://viacep.com.br/ws"
+	geocodingURL  = "https://geocoding-api.open-meteo.com/v1/search"
+	forecastURL   = "https://api.open-meteo.com/v1/forecast"
+	tracerName    = "clima-por-cep/service-b"
+	lookupFailure = "external lookup failed"
 )
 
-type Temperatures struct {
+type Result struct {
+	City       string  `json:"city"`
 	Celsius    float64 `json:"temp_C"`
 	Fahrenheit float64 `json:"temp_F"`
 	Kelvin     float64 `json:"temp_K"`
@@ -37,7 +44,6 @@ func NewService(client *http.Client) *Service {
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
 	}
-
 	return &Service{
 		client:       client,
 		viacepURL:    viacepURL,
@@ -46,23 +52,24 @@ func NewService(client *http.Client) *Service {
 	}
 }
 
-func (s *Service) Current(ctx context.Context, zipcode string) (Temperatures, error) {
-	location, err := s.lookupZipcode(ctx, zipcode)
+func (s *Service) Current(ctx context.Context, zipcode string) (Result, error) {
+	place, err := s.lookupZipcode(ctx, zipcode)
 	if err != nil {
-		return Temperatures{}, err
+		return Result{}, err
 	}
 
-	coordinates, err := s.lookupCoordinates(ctx, location)
+	coordinates, err := s.lookupCoordinates(ctx, place)
 	if err != nil {
-		return Temperatures{}, err
+		return Result{}, err
 	}
 
 	celsius, err := s.lookupTemperature(ctx, coordinates)
 	if err != nil {
-		return Temperatures{}, err
+		return Result{}, err
 	}
 
-	return Temperatures{
+	return Result{
+		City:       place.City,
 		Celsius:    round(celsius, 1),
 		Fahrenheit: round(celsius*1.8+32, 1),
 		Kelvin:     round(celsius+273, 2),
@@ -76,12 +83,17 @@ type location struct {
 }
 
 func (s *Service) lookupZipcode(ctx context.Context, zipcode string) (location, error) {
+	ctx, span := otel.Tracer(tracerName).Start(ctx, "zipcode.lookup")
+	defer span.End()
+
 	endpoint := fmt.Sprintf("%s/%s/json/", s.viacepURL, zipcode)
 	var result location
 	if err := s.getJSON(ctx, endpoint, &result); err != nil {
+		recordLookupFailure(span)
 		return location{}, err
 	}
 	if result.Error || result.City == "" || result.State == "" {
+		span.SetStatus(codes.Error, "zipcode not found")
 		return location{}, ErrZipcodeNotFound
 	}
 	return result, nil
@@ -122,11 +134,14 @@ func (s *Service) lookupCoordinates(ctx context.Context, place location) (coordi
 
 type forecastResponse struct {
 	Current struct {
-		Temperature float64 `json:"temperature_2m"`
+		Temperature *float64 `json:"temperature_2m"`
 	} `json:"current"`
 }
 
 func (s *Service) lookupTemperature(ctx context.Context, point coordinates) (float64, error) {
+	ctx, span := otel.Tracer(tracerName).Start(ctx, "temperature.lookup")
+	defer span.End()
+
 	query := url.Values{
 		"latitude":  {fmt.Sprintf("%f", point.Latitude)},
 		"longitude": {fmt.Sprintf("%f", point.Longitude)},
@@ -135,9 +150,14 @@ func (s *Service) lookupTemperature(ctx context.Context, point coordinates) (flo
 	endpoint := s.forecastURL + "?" + query.Encode()
 	var result forecastResponse
 	if err := s.getJSON(ctx, endpoint, &result); err != nil {
+		recordLookupFailure(span)
 		return 0, err
 	}
-	return result.Current.Temperature, nil
+	if result.Current.Temperature == nil {
+		span.SetStatus(codes.Error, lookupFailure)
+		return 0, errors.New("weather response missing current temperature")
+	}
+	return *result.Current.Temperature, nil
 }
 
 func (s *Service) getJSON(ctx context.Context, endpoint string, destination any) error {
@@ -158,6 +178,11 @@ func (s *Service) getJSON(ctx context.Context, endpoint string, destination any)
 		return fmt.Errorf("decode upstream response: %w", err)
 	}
 	return nil
+}
+
+func recordLookupFailure(span trace.Span) {
+	span.SetStatus(codes.Error, lookupFailure)
+	span.RecordError(errors.New(lookupFailure))
 }
 
 func round(value float64, places int) float64 {

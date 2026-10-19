@@ -5,67 +5,75 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
-type fakeWeather struct {
-	result Temperatures
+type fakeCurrentWeather struct {
+	result Result
 	err    error
-	called bool
 }
 
-func (f *fakeWeather) Current(_ context.Context, _ string) (Temperatures, error) {
-	f.called = true
+func (f fakeCurrentWeather) Current(context.Context, string) (Result, error) {
 	return f.result, f.err
 }
 
 func TestHandlerResponses(t *testing.T) {
 	tests := []struct {
 		name       string
-		url        string
-		weatherErr error
-		status     int
 		body       string
-		called     bool
+		result     Result
+		serviceErr error
+		status     int
+		response   string
 	}{
-		{name: "invalid format", url: "/?cep=1234abcd", status: http.StatusUnprocessableEntity, body: "invalid zipcode\n"},
-		{name: "not found", url: "/?cep=00000000", weatherErr: ErrZipcodeNotFound, status: http.StatusNotFound, body: "can not find zipcode\n", called: true},
-		{name: "upstream unavailable", url: "/?cep=01001000", weatherErr: errors.New("timeout"), status: http.StatusBadGateway, body: "weather service unavailable\n", called: true},
-		{name: "success", url: "/?cep=01001000", status: http.StatusOK, body: "{\"temp_C\":28.5,\"temp_F\":83.3,\"temp_K\":301.5}\n", called: true},
+		{
+			name:     "success",
+			body:     `{"cep":"01001000"}`,
+			result:   Result{City: "São Paulo", Celsius: 28.5, Fahrenheit: 83.3, Kelvin: 301.5},
+			status:   http.StatusOK,
+			response: `{"city":"São Paulo","temp_C":28.5,"temp_F":83.3,"temp_K":301.5}` + "\n",
+		},
+		{
+			name:     "invalid CEP",
+			body:     `{"cep":29902555}`,
+			status:   http.StatusUnprocessableEntity,
+			response: "invalid zipcode\n",
+		},
+		{
+			name:       "not found",
+			body:       `{"cep":"00000000"}`,
+			serviceErr: ErrZipcodeNotFound,
+			status:     http.StatusNotFound,
+			response:   "can not find zipcode\n",
+		},
+		{
+			name:       "upstream failure",
+			body:       `{"cep":"01001000"}`,
+			serviceErr: errors.New("upstream timeout"),
+			status:     http.StatusBadGateway,
+			response:   "weather service unavailable\n",
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			service := &fakeWeather{
-				result: Temperatures{Celsius: 28.5, Fahrenheit: 83.3, Kelvin: 301.5},
-				err:    test.weatherErr,
-			}
-			request := httptest.NewRequest(http.MethodGet, test.url, nil)
+			service := fakeCurrentWeather{result: test.result, err: test.serviceErr}
+			request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(test.body))
 			response := httptest.NewRecorder()
 			NewHandler(service).ServeHTTP(response, request)
-
-			if response.Code != test.status {
-				t.Errorf("status = %d, want %d", response.Code, test.status)
-			}
-			if response.Body.String() != test.body {
-				t.Errorf("body = %q, want %q", response.Body.String(), test.body)
-			}
-			if service.called != test.called {
-				t.Errorf("service called = %t, want %t", service.called, test.called)
+			if response.Code != test.status || response.Body.String() != test.response {
+				t.Fatalf("response = %d %q, want %d %q", response.Code, response.Body.String(), test.status, test.response)
 			}
 		})
 	}
 }
 
-func TestHandlerRejectsNonGET(t *testing.T) {
-	service := &fakeWeather{}
-	request := httptest.NewRequest(http.MethodPost, "/?cep=01001000", nil)
+func TestHandlerRejectsNonPOST(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	response := httptest.NewRecorder()
-	NewHandler(service).ServeHTTP(response, request)
+	NewHandler(fakeCurrentWeather{}).ServeHTTP(response, request)
 	if response.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("status = %d, want %d", response.Code, http.StatusMethodNotAllowed)
-	}
-	if service.called {
-		t.Fatal("service should not be called for non-GET requests")
+		t.Fatalf("status = %d, want 405", response.Code)
 	}
 }
