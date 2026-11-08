@@ -38,15 +38,20 @@ func TestCurrentConvertsTemperatures(t *testing.T) {
 }
 
 func TestLookupZipcodeNotFound(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"erro":true}`))
-	}))
-	defer upstream.Close()
+	// ViaCEP has answered unknown zipcodes with both a boolean and a string flag.
+	for _, body := range []string{`{"erro":true}`, `{"erro":"true"}`} {
+		t.Run(body, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(body))
+			}))
+			defer upstream.Close()
 
-	service := NewService(upstream.Client())
-	service.viacepURL = upstream.URL
-	_, err := service.Current(context.Background(), "00000000")
-	if err != ErrZipcodeNotFound {
-		t.Fatalf("Current() error = %v, want %v", err, ErrZipcodeNotFound)
+			service := NewService(upstream.Client())
+			service.viacepURL = upstream.URL
+			_, err := service.Current(context.Background(), "99999999")
+			if err != ErrZipcodeNotFound {
+				t.Fatalf("Current() error = %v, want %v", err, ErrZipcodeNotFound)
+			}
+		})
 	}
 }
