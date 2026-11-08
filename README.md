@@ -4,7 +4,8 @@ API em Go que recebe um CEP brasileiro, consulta a cidade no ViaCEP e obtém a t
 
 ## Acesso
 
-- **Cloud Run:** ainda não implantado. Preencha aqui a URL pública depois do deploy.
+- **Cloud Run:** https://clima-por-cep-952855876543.southamerica-east1.run.app
+  - Exemplo: `curl 'https://clima-por-cep-952855876543.southamerica-east1.run.app/?cep=01001000'`
 - **GitHub:** https://github.com/fabriciobonjorno/desafio-clima
 
 ## API
@@ -63,4 +64,4 @@ gcloud run deploy clima-por-cep \
   --port 8080
 ```
 
-Após o deploy, copie a URL exibida pelo comando para a seção **Acesso** acima. A aplicação não contém chaves de API; ViaCEP e Open-Meteo são chamados diretamente.
+A versão publicada está na URL da seção **Acesso** acima (região `southamerica-east1`). A aplicação não contém chaves de API; ViaCEP e Open-Meteo são chamados diretamente.
